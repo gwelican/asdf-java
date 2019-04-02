@@ -25,6 +25,24 @@ log_warning() {
 	log 3 ':o' "$@"
 }
 
+get_arch() {
+	case "$(uname -m)" in
+    x86_64)
+        echo x64
+    ;;
+	esac
+}
+get_os() {
+	case "$(uname -s)" in
+    Linux)
+        echo linux
+    ;;
+    Darwin)
+        echo mac
+    ;;
+esac
+}
+
 log_error() {
 	log 1 ':(' "$@"
 }
@@ -34,141 +52,74 @@ install_java() {
 	local versionstr=$1
 	local destdir=$2
 
-	IFS=- read distro version <<< $versionstr
+	versionstr=${versionstr/jdk-8u/jdk-8+}
 
-	local variant=$(get_variant $distro)
+	IFS="-" read jvm_version java_version<<<"$versionstr"
 	[[ -z "$ASDF_JAVA_ERROR" ]] || return
 
-	get_java $distro $version $variant $destdir
+	get_java $jvm_version $java_version $destdir
 	[[ -z "$ASDF_JAVA_ERROR" ]] || return
-
-	unpack_java $variant $destdir
-	[[ -z "$ASDF_JAVA_ERROR" ]] || return
-}
-
-# Get the "variant" piece of the Oracle url.
-get_variant() {
-	local distro=$1
-	case "$(uname -s)" in
-		Linux)
-			case "$(uname -m)" in
-				x86_64)
-					case $distro in
-						oracle) echo linux-x64.tar.gz ;;
-						openjdk) echo linux-x64_bin.tar.gz ;;
-						*) ;;
-					esac ;;
-				i[[3-9]]86)
-					case $distro in
-						oracle) echo linux-i586.tar.gz ;;
-						openjdk) echo linux-i586_bin.tar.gz ;;
-						*) ;;
-					esac ;;
-				*) ASDF_JAVA_ERROR="$(uname -m) is not supported on linux" ;;
-			esac ;;
-		Darwin)
-			case "$(uname -m)" in
-				x86_64)
-					case $distro in
-						oracle) echo macosx-x64.dmg ;;
-						openjdk) echo osx-x64_bin.tar.gz ;;
-						*) ;;
-					esac ;;
-				*) ASDF_JAVA_ERROR="$(uname -m) is not supported on MacOS" ;;
-			esac ;;
-		*) ASDF_JAVA_ERROR="$(uname -s) is not supported" ;;
-	esac
-}
-
-get_current_variant() {
-	local variant=$1
-
-	if [[ "$variant" == *"mac"* ]]; then
-		variant=$(echo $variant | sed -e 's|mac||')
-	fi
-
-	if [[ "$variant" == *"tar"* ]]; then
-		echo $variant | sed -e 's|.tar|_bin.tar|'
-	elif [[ "$variant" == *"dmg"* ]]; then
-		echo $variant | sed -e 's|.dmg|_bin.dmg|'
-	fi
-}
-
-get_base_url() {
-	local distro=$1
-	case $distro in
-		oracle) echo "http://download.oracle.com/otn-pub/java/jdk/" ;;
-		openjdk) echo "https://download.java.net/java/GA/jdk" ;;
-		*) ;;
-	esac
 }
 
 # Download java from Oracle.
 get_java() {
-	local distro=$1
-	local version=$2
-	local variant=$3
-	local destdir=$4
+	local jvm_version=$1
+	local java_version=$2
+	local destdir=$3
 
-	local base=$(get_base_url $distro)
-	local oracle8_version=$(echo $version | sed -e 's|\.|u|g')
+	local releases=$()
 
-	case $distro-$version in
-		oracle-11.0.1) url=$base$version+13/90cf5d8f270a4347a95050320eef3fb7/jdk-$version'_'$(get_current_variant $variant) ;;
-		oracle-8.191)  url=$base$oracle8_version-b12/2787e4a523244c269598db4e85c51e0c/jdk-$oracle8_version-$variant ;;
-		oracle-8.141)  url=$base$oracle8_version-b15/336fa29ff2bb4ef291e347e091f7f4a7/jdk-$oracle8_version-$variant ;;
-		oracle-8.131)  url=$base$oracle8_version-b11/d54c1d3a095b4ff2b6607d096fa80163/jdk-$oracle8_version-$variant ;;
+	local binary_details=$(curl -s "https://api.adoptopenjdk.net/v2/info/releases/openjdk${jvm_version##jdk}?release=latest&openjdk_impl=hotspot&os=$(get_os)&type=jdk&arch=$(get_arch)&heap_size=normal" | awk '
+		match($0, /"binary_link"\s*:\s*"(.*)"/, m) { binary_link=m[1] }
+		match($0, /"binary_name"\s*:\s*"(.*)"/, m) { binary_name=m[1] }
+		match($0, /"openjdk_version"\s*:\s*"(.*)"/, m) && m[1] != "'$java_version'" { binary_link=""; binary_name="" }
+		match($0, /"updated_at"\s*:\s*"(.*)"/, m) && binary_link != "" { printf("%s|%s", binary_link, binary_name) }
+	')
 
-		openjdk-11.0.1) url=${base}11/13/GPL/openjdk-11.0.1_$variant ;;
-		openjdk-11)     url=${base/\/GA\//\/ga\/}11/openjdk-11_$variant ;;
-		openjdk-10.0.2) url=$base'10'/$version/19aef61b38124481863b1413dce1855f/13/openjdk-$version'_'$variant ;;
-
-		*) ASDF_JAVA_ERROR="$version is not a supported version" ;;
-	esac
-	[[ -z "$ASDF_JAVA_ERROR" ]] || return
-
+	IFS="|" read binary_link binary_name <<<"$binary_details"
+	
 	log_info downloading $url
 
 	curl -fLC - \
 		--progress-bar \
 		--retry 3 --retry-delay 3 \
-		-b oraclelicense=accept-securebackup-cookie \
-		-o $destdir/$variant $url
+		-o $destdir/$binary_name $binary_link
+
+	cd $destdir; {
+		tar -xzf $binary_name
+		[[ $? == 0 ]] || ASDF_JAVA_ERROR="expanding java dist"
+		rm $binary_name
+
+		local pkg=$(echo * | grep jdk)
+		echo $pkg
+		if [ -d $pkg/Contents/Home ]; then
+			mv $pkg/Contents/Home/* .
+		else
+			mv $pkg/* .
+		fi
+		rm -rf ./$pkg
+	}; cd $origin
 
 	[[ $? != 0 ]] && ASDF_JAVA_ERROR="downloading java dist"
 }
 
 # Unpacks all kinds of sources.
 unpack_java() {
-	local variant=$1
-	local destdir=$2
+	local version=$1
+	local jvm=$2
+	local destdir=$3
 
 	log_info expanding java dist
 
-	case $variant in
-		*.tar.gz) unpack_tar $variant $destdir ;;
-		*.dmg)    unpack_dmg $variant $destdir ;;
-		*) ASDF_JAVA_ERROR="$variant is not supported" ;;
-	esac
-}
-
-# Unarchive a tar archive into the install directory and cleanup.
-#
-# NOTE: Using $origin as a memo rather than executing in a subshell
-#   because errors won't be persisted from a subshell.
-#
-# TODO: Should be sanitized with error reporting.
-unpack_tar() {
-	local variant=$1
-	local destdir=$2
-
 	local origin=$(pwd)
+
 	cd $destdir; {
-		tar -xzf $variant
+		tar -xzf $file
 		[[ $? == 0 ]] || ASDF_JAVA_ERROR="expanding java dist"
-		rm $variant
+		rm $file
 
 		local pkg=$(echo * | grep jdk)
+		echo $pkg
 		if [ -d $pkg/Contents/Home ]; then
 			mv $pkg/Contents/Home/* .
 		else
@@ -176,65 +127,7 @@ unpack_tar() {
 		fi
 		rmdir $pkg
 	}; cd $origin
-}
 
-# Unarchive a tar archive into the install directory and cleanup.
-#
-# NOTE: Using $origin as a memo rather than executing in a subshell
-#   because errors won't be persisted from a subshell.
-#
-# TODO: Should be sanitized with error reporting.
-unpack_dmg() {
-	local variant=$1
-	local destdir=$2
-
-	local origin=$(pwd)
-	cd $destdir; {
-		local pkgdir=$destdir/asdf_tmp_pkgdir
-		local imgdir=$destdir/asdf_tmp_imgdir
-
-		mount_dmg $imgdir $variant
-		[[ -z "$ASDF_JAVA_ERROR" ]] || return
-
-		pkgutil --expand $imgdir/*.pkg $pkgdir
-		if [[ $? != 0 ]]; then
-			ASDF_JAVA_ERROR="expanding java dist"
-			unmount_dmg $imgdir
-			return
-		fi
-
-		cd $pkgdir/jdk*.pkg; {
-			cat Payload | gzip -d | cpio -i
-			if [[ $? != 0 ]] || ! [[ -d Contents ]]; then
-				ASDF_JAVA_ERROR="demangling dist payload"
-			fi
-			mv Contents/Home/* $destdir/
-		}; cd $destdir
-
-		unmount_dmg $imgdir
-		rm -r $destdir/$variant
-	}; cd $origin
-}
-
-mount_dmg() {
-	local dir=$1
-	local dev=$2
-
-	hdiutil mount -quiet -mountpoint $dir $dev
-	[[ $? == 0 ]] || ASDF_JAVA_ERROR="mounting java dist"
-}
-
-unmount_dmg() {
-	local dir=$1
-
-	hdiutil unmount -quiet $dir
-	if [[ $? != 0 ]]; then
-		[[ -z "$ASDF_JAVA_ERROR" ]] || \
-			ASDF_JAVA_ERROR="unmounting java dist"
-
-		log_warning "The java dist is still mounted at $dir."
-		log_warning " Use hdiutil unmount to unmount it."
-	fi
 }
 
 #

@@ -1,11 +1,33 @@
-#!/bin/env bash
+#!/bin/bash
 
-echo $(echo "
-oracle-8.131
-oracle-8.141
-oracle-8.191
-oracle-11.0.1
-openjdk-10.0.2
-openjdk-11
-openjdk-11.0.1
-")
+# versions=$(cat versions.json)
+
+case "$(uname -m)" in
+    x86_64)
+        target_arch=x64
+    ;;
+esac
+
+case "$(uname -s)" in
+    Linux)
+        target_os=linux
+    ;;
+    Darwin)
+        target_os=mac
+    ;;
+esac
+
+verions=""
+for ver in 12 11 10 9 8; do
+    version=$(curl -s "https://api.adoptopenjdk.net/v2/info/releases/openjdk$ver?release=latest&openjdk_impl=hotspot&os=$target_os&type=jdk&arch=$target_arch&heap_size=normal" | awk '
+        match($0, /"os"\s*:\s*"(.*)"/, m) { os=m[1]; }
+        match($0, /"openjdk_version"\s*:\s*"(.*)"/, m) && os != "" { openjdkver=m[1]; }
+        match($0, /"version"\s*:\s*"(.*)"/, m) && os != "" { ver=m[1]; }
+        match($0, /"heap_size"\s*:\s*"normal"/, m) && os != "" { printf("jdk%s-%s ", ver, openjdkver);os="" }
+    ')
+    # match($0, /"architecture"\s*:\s*"('$target_arch')"/, m) && os != "" { arch=m[1] }
+    
+    versions="$version $versions"
+done
+
+echo -e "$versions"
