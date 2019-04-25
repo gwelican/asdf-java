@@ -16,13 +16,13 @@ asdf plugin-add java
 and install new versions like this:
 
 ```bash
-asdf install java openjdk-11.0.1
+asdf install java 
 ```
 
 and switch versions like this:
 
 ```bash
-asdf global java openjdk-11.0.1
+asdf global java jdk12-12.0.1
 ```
 
 If you want or need `JAVA_HOME` set you can load our `asdf` wrapper to your shell initialization (in `.bashrc`, for example):
@@ -54,8 +54,6 @@ asdf plugin-add gradle https://github.com/rfrancis/asdf-gradle
 
 By using this software you agree to:
 
-- [Oracle Binary Code License Agreement for the Java SE Platform Products and JavaFX](http://www.oracle.com/technetwork/java/javase/terms/license/index.html)
-- [Oracle Technology Network Early Adopter Development License Agreement](http://www.oracle.com/technetwork/licenses/ea-license-noexhibits-1938914.html) in case of EA releases
 - Apple's Software License Agreement in case of "Java for OS X"
 - [International License Agreement for Non-Warranted Programs](http://www14.software.ibm.com/cgi-bin/weblap/lap.pl?la_formnum=&li_formnum=L-PMAA-A3Z8P2&l=en) in case of IBM SDK, Java Technology Edition.
 
